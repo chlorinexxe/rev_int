@@ -1,16 +1,5 @@
 import { db } from "../db";
 
-/* ---------- helpers ---------- */
-
-function dbGet<T>(sql: string, params: any[] = []): Promise<T | undefined> {
-  return new Promise((resolve, reject) => {
-    db.get(sql, params, (err, row) => {
-      if (err) reject(err);
-      else resolve(row as T);
-    });
-  });
-}
-
 function dbAll<T>(sql: string, params: any[] = []): Promise<T[]> {
   return new Promise((resolve, reject) => {
     db.all(sql, params, (err, rows) => {
@@ -20,132 +9,91 @@ function dbAll<T>(sql: string, params: any[] = []): Promise<T[]> {
   });
 }
 
-/* ---------- date helpers ---------- */
-
-function getQuarterInfo(date: Date) {
-  const year = date.getFullYear();
-  const month = date.getMonth();
-  const quarter = Math.floor(month / 3) + 1;
-
-  const startMonth = (quarter - 1) * 3;
-  const endMonth = startMonth + 2;
-
-  const start = new Date(year, startMonth, 1);
-  const end = new Date(year, endMonth + 1, 0);
-
-  return {
-    label: `Q${quarter} ${year}`,
-    start: start.toISOString().slice(0, 10),
-    end: end.toISOString().slice(0, 10)
-  };
+async function getTargetYear(): Promise<number> {
+  const rows = await dbAll<{ month: string }>("SELECT month FROM targets ORDER BY month DESC LIMIT 1");
+  if (rows.length === 0) throw new Error("No targets data");
+  return parseInt(rows[0].month.split("-")[0], 10);
 }
 
-/* ---------- service ---------- */
+function generateYearMonths(year: number): string[] {
+  return Array.from({ length: 12 }, (_, i) => `${year}-${String(i + 1).padStart(2, "0")}`);
+}
 
 export async function getRevenueDrivers() {
-  // 1️⃣ Find latest closed deal to anchor the quarter
-  const latestDeal = await dbGet<{ latest: string }>(
-    "SELECT MAX(closed_at) as latest FROM deals WHERE closed_at IS NOT NULL"
+  const year = await getTargetYear();
+
+  const months = generateYearMonths(year);
+
+  // 1. Pipeline values per month (sum of open deals created before or on month end)
+  const pipelineRows = await dbAll<{
+    month: string;
+    pipelineValue: number;
+  }>(
+    `
+    SELECT
+      strftime('%Y-%m', created_at) AS month,
+      SUM(amount) AS pipelineValue
+    FROM deals
+    WHERE stage IN ('Prospecting', 'Negotiation')
+      AND created_at <= date(?, 'start of month', '+1 month', '-1 day')
+    GROUP BY month
+    `,
+    [year + "-12-31"]
   );
 
-  if (!latestDeal?.latest) {
-    return {
-      quarter: null,
-      pipeline: { value: 0, dealCount: 0 },
-      winRate: { value: null, closedWon: 0, closedLost: 0 },
-      averageDealSize: { value: 0 },
-      salesCycle: { avgDays: 0 }
-    };
+  // Map pipeline by month, but this query only returns months with created_at dates, need full 12 months
+  const pipelineMap = new Map<string, number>();
+  for (const row of pipelineRows) {
+    pipelineMap.set(row.month, row.pipelineValue ?? 0);
   }
 
-  const { label, start, end } = getQuarterInfo(
-    new Date(latestDeal.latest)
-  );
-
-  /* ---------- Pipeline Size ---------- */
-  const pipelineRow = await dbGet<{
-    value: number;
-    count: number;
+  // 2. Closed deals stats grouped by closed_at month: winAmount, lostAmount, avgDealSize, avgSalesCycle
+  const closedDealsRows = await dbAll<{
+    month: string;
+    wonAmount: number;
+    lostAmount: number;
+    avgDealSize: number;
+    avgSalesCycleDays: number;
   }>(
     `
     SELECT
-      SUM(amount) as value,
-      COUNT(*) as count
-    FROM deals
-    WHERE stage NOT IN ('Closed Won', 'Closed Lost')
-    `
-  );
-
-  /* ---------- Win Rate ---------- */
-  const winRateRow = await dbGet<{
-    won: number;
-    lost: number;
-  }>(
-    `
-    SELECT
-      SUM(CASE WHEN stage = 'Closed Won' THEN 1 ELSE 0 END) as won,
-      SUM(CASE WHEN stage = 'Closed Lost' THEN 1 ELSE 0 END) as lost
+      strftime('%Y-%m', closed_at) AS month,
+      SUM(CASE WHEN stage = 'Closed Won' THEN amount ELSE 0 END) AS wonAmount,
+      SUM(CASE WHEN stage = 'Closed Lost' THEN amount ELSE 0 END) AS lostAmount,
+      AVG(CASE WHEN stage = 'Closed Won' THEN amount ELSE NULL END) AS avgDealSize,
+      AVG(CASE WHEN stage = 'Closed Won' THEN julianday(closed_at) - julianday(created_at) ELSE NULL END) AS avgSalesCycleDays
     FROM deals
     WHERE stage IN ('Closed Won', 'Closed Lost')
       AND closed_at BETWEEN ? AND ?
+    GROUP BY month
     `,
-    [start, end]
+    [`${year}-01-01`, `${year}-12-31`]
   );
 
-  const closedWon = winRateRow?.won ?? 0;
-  const closedLost = winRateRow?.lost ?? 0;
+  // Map closed deals stats by month
+  const closedMap = new Map<string, typeof closedDealsRows[0]>();
+  for (const row of closedDealsRows) {
+    closedMap.set(row.month, row);
+  }
 
-  const winRate =
-    closedWon + closedLost > 0
-      ? closedWon / (closedWon + closedLost)
-      : null;
+  // Build final array per month for whole year
+  const monthly = months.map((month) => {
+    const closed = closedMap.get(month);
+    const wonAmount = closed?.wonAmount ?? 0;
+    const lostAmount = closed?.lostAmount ?? 0;
+    const winRate = wonAmount + lostAmount > 0 ? wonAmount / (wonAmount + lostAmount) : null;
 
-  /* ---------- Average Deal Size ---------- */
-  const avgDealRow = await dbGet<{ avg: number }>(
-    `
-    SELECT AVG(amount) as avg
-    FROM deals
-    WHERE stage = 'Closed Won'
-      AND closed_at BETWEEN ? AND ?
-    `,
-    [start, end]
-  );
-
-  /* ---------- Sales Cycle Time ---------- */
-  const salesCycleRow = await dbGet<{ avgDays: number }>(
-    `
-    SELECT AVG(
-      julianday(closed_at) - julianday(created_at)
-    ) as avgDays
-    FROM deals
-    WHERE stage = 'Closed Won'
-      AND closed_at BETWEEN ? AND ?
-    `,
-    [start, end]
-  );
+    return {
+      month,
+      pipelineValue: pipelineMap.get(month) ?? 0,
+      winRate,
+      avgDealSize: closed?.avgDealSize ?? 0,
+      salesCycleDays: closed?.avgSalesCycleDays ? Math.round(closed.avgSalesCycleDays) : 0
+    };
+  });
 
   return {
-    quarter: label,
-
-    pipeline: {
-      value: pipelineRow?.value ?? 0,
-      dealCount: pipelineRow?.count ?? 0
-    },
-
-    winRate: {
-      value: winRate,
-      closedWon,
-      closedLost
-    },
-
-    averageDealSize: {
-      value: avgDealRow?.avg ?? 0
-    },
-
-    salesCycle: {
-      avgDays: salesCycleRow?.avgDays
-        ? Math.round(salesCycleRow.avgDays)
-        : 0
-    }
+    year,
+    monthly
   };
 }

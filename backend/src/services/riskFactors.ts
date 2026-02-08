@@ -36,94 +36,132 @@ function getQuarterInfo(date: Date) {
 
 /* ---------- service ---------- */
 export async function getRiskFactors() {
-  // Latest deal to determine quarter
   const latestDeal = await dbGet<{ latest: string }>(
-    "SELECT MAX(closed_at) as latest FROM deals WHERE closed_at IS NOT NULL"
+    "SELECT MAX(COALESCE(closed_at, created_at)) as latest FROM deals"
   );
+
   if (!latestDeal?.latest) {
-    return { staleDeals: [], underperformingReps: [], lowActivityAccounts: [] };
+    return {
+      staleDeals: { count: 0, thresholdDays: 30, items: [] },
+      underperformingReps: { count: 0, items: [] },
+      lowActivityAccounts: { count: 0, thresholdDays: 30, items: [] },
+    };
   }
 
   const { start, end } = getQuarterInfo(new Date(latestDeal.latest));
 
-  /* ---------- Stale Deals ---------- */
-  // deals not updated via activity in last 30 days
+  /* ================= STALE DEALS ================= */
   const staleDeals = await dbAll<{
     deal_id: string;
+    dealName: string;
     account_id: string;
-    rep_id: string;
+    accountName: string;
     stage: string;
-    daysSinceUpdate: number;
-  }>(
-    `
-    SELECT d.deal_id, d.account_id, d.rep_id, d.stage,
-      CAST(julianday('now') - julianday(
-        COALESCE(a.last_activity, d.created_at)
-      ) AS INTEGER) AS daysSinceUpdate
+    amount: number;
+    daysSinceActivity: number;
+  }>(`
+    SELECT
+      d.deal_id,
+      d.deal_id AS dealName,
+      d.account_id,
+      ac.name AS accountName,
+      d.stage,
+      d.amount,
+      CAST(
+        julianday('now') - julianday(
+          COALESCE(MAX(a.timestamp), d.created_at)
+        ) AS INTEGER
+      ) AS daysSinceActivity
     FROM deals d
-    LEFT JOIN (
-      SELECT deal_id, MAX(timestamp) AS last_activity
-      FROM activities
-      GROUP BY deal_id
-    ) a ON d.deal_id = a.deal_id
+    LEFT JOIN activities a ON d.deal_id = a.deal_id
+    LEFT JOIN accounts ac ON d.account_id = ac.account_id
     WHERE d.stage NOT IN ('Closed Won', 'Closed Lost')
-      AND (julianday('now') - julianday(COALESCE(a.last_activity, d.created_at))) > 30
-    ORDER BY daysSinceUpdate DESC
-    LIMIT 50
-    `
-  );
+    GROUP BY d.deal_id
+    HAVING daysSinceActivity > 30
+    ORDER BY daysSinceActivity DESC
+  `);
 
-  /* ---------- Underperforming Reps ---------- */
+  /* ================= UNDERPERFORMING REPS ================= */
   const underperformingReps = await dbAll<{
     rep_id: string;
+    repName: string;
     revenue: number;
     target: number;
     percentOfTarget: number;
   }>(
     `
-    SELECT d.rep_id,
-           SUM(CASE WHEN d.stage = 'Closed Won' THEN d.amount ELSE 0 END) AS revenue,
-           COALESCE(SUM(t.target),0) AS target,
-           CASE WHEN COALESCE(SUM(t.target),0) > 0 THEN
-             (SUM(CASE WHEN d.stage = 'Closed Won' THEN d.amount ELSE 0 END) * 100.0) / SUM(t.target)
-           ELSE 0 END AS percentOfTarget
-    FROM deals d
+    SELECT
+      r.rep_id,
+      r.name AS repName,
+      SUM(CASE WHEN d.stage = 'Closed Won' THEN d.amount ELSE 0 END) AS revenue,
+      COALESCE(SUM(t.target), 0) AS target,
+      CASE
+        WHEN COALESCE(SUM(t.target), 0) > 0
+        THEN ROUND(
+          (SUM(CASE WHEN d.stage = 'Closed Won' THEN d.amount ELSE 0 END) * 100.0)
+          / SUM(t.target),
+          1
+        )
+        ELSE 0
+      END AS percentOfTarget
+    FROM reps r
+    LEFT JOIN deals d ON d.rep_id = r.rep_id
+      AND d.closed_at BETWEEN ? AND ?
     LEFT JOIN targets t
       ON t.month IN (
-           strftime('%Y-%m', ?),
-           strftime('%Y-%m', date(?, '+1 month')),
-           strftime('%Y-%m', date(?, '+2 month'))
-         )
-    WHERE d.closed_at BETWEEN ? AND ?
-    GROUP BY d.rep_id
+        strftime('%Y-%m', ?),
+        strftime('%Y-%m', date(?, '+1 month')),
+        strftime('%Y-%m', date(?, '+2 month'))
+      )
+    GROUP BY r.rep_id
     HAVING percentOfTarget < 80
     ORDER BY percentOfTarget ASC
-    LIMIT 20
     `,
-    [start, start, start, start, end]
+    [start, end, start, start, start]
   );
 
-  /* ---------- Low Activity Accounts ---------- */
+  /* ================= LOW ACTIVITY ACCOUNTS ================= */
   const lowActivityAccounts = await dbAll<{
     account_id: string;
     accountName: string;
-    recentActivity: number;
-  }>(
-    `
-    SELECT d.account_id,
-           MAX(a.timestamp) AS last_activity,
-           COUNT(a.activity_id) AS recentActivity,
-           MAX(ac.name) AS accountName
-    FROM deals d
-    LEFT JOIN activities a ON d.deal_id = a.deal_id
-    LEFT JOIN accounts ac ON d.account_id = ac.account_id
-    WHERE julianday('now') - julianday(a.timestamp) <= 30
-    GROUP BY d.account_id
-    HAVING recentActivity < 3
-    ORDER BY recentActivity ASC
-    LIMIT 50
-    `
-  );
+    lastActivity: string | null;
+    activityCount: number;
+    daysSinceLastActivity: number | null;
+  }>(`
+    SELECT
+      ac.account_id,
+      ac.name AS accountName,
+      MAX(a.timestamp) AS lastActivity,
+      COUNT(a.activity_id) AS activityCount,
+      CAST(
+        julianday('now') - julianday(MAX(a.timestamp))
+        AS INTEGER
+      ) AS daysSinceLastActivity
+    FROM accounts ac
+    LEFT JOIN deals d ON d.account_id = ac.account_id
+    LEFT JOIN activities a ON a.deal_id = d.deal_id
+    GROUP BY ac.account_id
+    HAVING
+      lastActivity IS NULL
+      OR daysSinceLastActivity > 30
+      OR activityCount < 3
+    ORDER BY activityCount ASC
+  `);
 
-  return { staleDeals, underperformingReps, lowActivityAccounts };
+  return {
+    staleDeals: {
+      count: staleDeals.length,
+      thresholdDays: 30,
+      items: staleDeals,
+    },
+    underperformingReps: {
+      count: underperformingReps.length,
+      items: underperformingReps,
+    },
+    lowActivityAccounts: {
+      count: lowActivityAccounts.length,
+      thresholdDays: 30,
+      items: lowActivityAccounts,
+    },
+  };
 }

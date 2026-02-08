@@ -1,56 +1,56 @@
 import { getRiskFactors } from "./riskFactors";
 
-/* ---------- db helpers (only if needed for extra queries) ---------- */
-function dbAll<T>(sql: string, params: any[] = []): Promise<T[]> {
-  return new Promise((resolve, reject) => {
-    import("../db").then(({ db }) => {
-      db.all(sql, params, (err, rows) => {
-        if (err) reject(err);
-        else resolve(rows as T[]);
-      });
-    });
-  });
-}
-
 /* ---------- main recommendations service ---------- */
 export async function getRecommendations() {
   const recommendations: string[] = [];
 
-  // 1️⃣ Get risk factors
   const risks = await getRiskFactors();
 
-  // 2️⃣ Focus on stale deals older than 30 days
-  const staleDeals30 = risks.staleDeals.filter(d => d.daysSinceUpdate > 30);
-  if (staleDeals30.length > 0) {
+  /* ================= STALE DEALS ================= */
+  if (risks.staleDeals.count > 0) {
+    const veryStale = risks.staleDeals.items.filter(
+      d => d.daysSinceActivity > 45
+    );
+
     recommendations.push(
-      `Focus on ${staleDeals30.length} deals older than 30 days`
+      veryStale.length > 0
+        ? `Urgently review ${veryStale.length} deals idle for over 45 days`
+        : `Focus on ${risks.staleDeals.count} stale deals with no recent activity`
     );
   }
 
-  // 3️⃣ Coach underperforming reps (<50% target)
-  risks.underperformingReps.forEach(rep => {
-    if (rep.percentOfTarget < 50) {
-      recommendations.push(`Coach Rep ${rep.rep_id} to improve win rate`);
-    }
-  });
-
-  // 4️⃣ Increase activity for low-activity accounts
-  risks.lowActivityAccounts.forEach(acc => {
-    recommendations.push(
-      `Increase engagement for account ${acc.accountName} (recent activity: ${acc.recentActivity})`
+  /* ================= UNDERPERFORMING REPS ================= */
+  if (risks.underperformingReps.count > 0) {
+    const criticalReps = risks.underperformingReps.items.filter(
+      r => r.percentOfTarget < 50
     );
-  });
 
-  // 5️⃣ Prioritize negotiation deals at risk of delay
-  const lowRevenueNegotiations = risks.staleDeals.filter(
-    d => d.stage === "Negotiation" && d.daysSinceUpdate > 30
-  );
-  if (lowRevenueNegotiations.length > 0) {
+    criticalReps.slice(0, 2).forEach(rep => {
+      recommendations.push(
+        `Coach ${rep.repName} to improve performance (${rep.percentOfTarget}% of target)`
+      );
+    });
+  }
+
+  /* ================= LOW ACTIVITY ACCOUNTS ================= */
+  if (risks.lowActivityAccounts.count > 0) {
+    const worstAccounts = risks.lowActivityAccounts.items
+      .filter(a => a.activityCount < 2)
+      .slice(0, 1);
+
+    worstAccounts.forEach(acc => {
+      recommendations.push(
+        `Increase engagement with ${acc.accountName} (very low recent activity)`
+      );
+    });
+  }
+
+  /* ================= FALLBACK ================= */
+  if (recommendations.length === 0) {
     recommendations.push(
-      `Prioritize ${lowRevenueNegotiations.length} Negotiation deals at risk of delay`
+      "Pipeline execution is healthy — maintain current momentum"
     );
   }
 
-  // Limit to max 5 recommendations
-  return recommendations.slice(0, 5);
+  return recommendations.slice(0, 7);
 }
