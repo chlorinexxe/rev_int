@@ -1,4 +1,4 @@
-import React, { useEffect } from "react";
+import React from "react";
 import {
   Card,
   CardContent,
@@ -73,14 +73,6 @@ const RiskTable: React.FC<RiskTableProps> = ({
   const repItems = safeArray<UnderperformingRep>(underperformingReps.items.items || []);
   const accountItems = safeArray<LowActivityAccount>(lowActivityAccounts.items.items || []);
 
-  useEffect(() => {
-    console.log("RiskTable props - Stale Deals count: ", staleCount);
-    console.log("RiskTable props - Underperforming Reps count: ", repCount);
-    console.log("RiskTable props - Low Activity Accounts count: ", accountCount);
-    console.log("RiskTable props - Stale Deals items: ", staleDeals.items.items);
-    console.log("RiskTable props - Underperforming Reps items: ", underperformingReps.items.items);
-    console.log("RiskTable props - Low Activity Accounts items: ", lowActivityAccounts.items.items);
-  }, [staleDeals, underperformingReps, lowActivityAccounts]);
 
   return (
     <Card>
