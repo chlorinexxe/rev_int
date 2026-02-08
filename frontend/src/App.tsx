@@ -1,5 +1,5 @@
 // frontend/src/App.tsx
-import React, { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { api } from "./api/client";
 import SummaryCards from "./components/SummaryCards";
 import DriversChart from "./components/DriversChart";
@@ -61,8 +61,19 @@ function App() {
   const [drivers, setDrivers] = useState<any>(null);
   const [riskFactors, setRiskFactors] = useState<any>(null);
   const [recommendations, setRecommendations] = useState<any>(null);
+  const [revenueTrend, setRevenueTrend] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        const trendData = await api.getRevenueTrend(); // new API call
+        setRevenueTrend(trendData);
+      } catch (err) {
+        console.error(err);
+      }
+    };
+    fetchData();
+  }, []);
   useEffect(() => {
     const fetchData = async () => {
       try {
@@ -97,7 +108,7 @@ function App() {
         setRiskFactors({
           staleDeals: {
             count: riskData.staleDeals?.length ?? 0,
-            thresholdDays: 30,
+            thresholdDays: 120,
             items: riskData.staleDeals ?? [],
           },
           underperformingReps: {
@@ -180,10 +191,13 @@ function App() {
 
             {/* Row 2 – Revenue Trend (FIXED POSITION) */}
             <Grid item xs={12}>
-              {drivers && (
-                <RevenueTrend data={drivers.monthly.slice(-6)} />
-              )}
-            </Grid>
+            {revenueTrend && revenueTrend.months && (
+              <RevenueTrend 
+                data={revenueTrend.months} 
+                title="Revenue vs Target (Last 6 Months)" 
+              />
+            )}
+          </Grid>
 
           </Grid>
         </Grid>

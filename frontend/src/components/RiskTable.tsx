@@ -1,5 +1,4 @@
-// frontend/src/components/RiskTable.tsx
-import React from "react";
+import React, { useEffect } from "react";
 import {
   Card,
   CardContent,
@@ -39,25 +38,20 @@ interface LowActivityAccount {
 
 interface RiskTableProps {
   staleDeals: {
-    count: number;
-    thresholdDays: number;
-    items: StaleDeal[];
+    items: { count: number; thresholdDays: number; items: StaleDeal[] };
   };
   underperformingReps: {
-    count: number;
-    items: UnderperformingRep[];
+    items: { count: number; items: UnderperformingRep[] };
   };
   lowActivityAccounts: {
-    count: number;
-    thresholdDays: number;
-    items: LowActivityAccount[];
+    items: { count: number; thresholdDays: number; items: LowActivityAccount[] };
   };
 }
 
 /* ================= HELPERS ================= */
 
 const formatCurrency = (val: number) =>
-  `$${Math.round(val).toLocaleString()}`;
+  `$${val.toLocaleString()}`;
 
 const safeArray = <T,>(val: any): T[] =>
   Array.isArray(val) ? val : [];
@@ -69,118 +63,141 @@ const RiskTable: React.FC<RiskTableProps> = ({
   underperformingReps,
   lowActivityAccounts,
 }) => {
-  const staleItems = safeArray<StaleDeal>(staleDeals?.items);
-  const repItems = safeArray<UnderperformingRep>(underperformingReps?.items);
-  const accountItems = safeArray<LowActivityAccount>(lowActivityAccounts?.items);
+  // Extract the count from within the `items` object for each category
+  const staleCount = staleDeals.items.count;
+  const repCount = underperformingReps.items.count;
+  const accountCount = lowActivityAccounts.items.count;
+
+  // Extract the items for rendering
+  const staleItems = safeArray<StaleDeal>(staleDeals.items.items || []);
+  const repItems = safeArray<UnderperformingRep>(underperformingReps.items.items || []);
+  const accountItems = safeArray<LowActivityAccount>(lowActivityAccounts.items.items || []);
+
+  useEffect(() => {
+    console.log("RiskTable props - Stale Deals count: ", staleCount);
+    console.log("RiskTable props - Underperforming Reps count: ", repCount);
+    console.log("RiskTable props - Low Activity Accounts count: ", accountCount);
+    console.log("RiskTable props - Stale Deals items: ", staleDeals.items.items);
+    console.log("RiskTable props - Underperforming Reps items: ", underperformingReps.items.items);
+    console.log("RiskTable props - Low Activity Accounts items: ", lowActivityAccounts.items.items);
+  }, [staleDeals, underperformingReps, lowActivityAccounts]);
 
   return (
     <Card>
-      <CardContent>
-        <Typography variant="h6" gutterBottom>
+      <CardContent sx={{ p: 1 }}> {/* Reduced padding for the whole content */}
+        <Typography variant="h6" sx={{ mb: 1 }}>
           ⚠️ Risk Factors
         </Typography>
 
         {/* ================= STALE DEALS ================= */}
-        <Box mb={3}>
+        <Box mb={0.5}>
           <Box display="flex" justifyContent="space-between">
-            <Typography variant="subtitle1">Stale Deals</Typography>
+            <Typography variant="subtitle1" sx={{ mb: 0 }}>
+              Stale Deals
+            </Typography>
             <Chip
-              label={staleDeals.count}
-              color={staleDeals.count > 0 ? "error" : "success"}
+              label={staleCount}
+              color={staleCount > 0 ? "error" : "success"}
               size="small"
+              sx={{ marginLeft: 0 }}
             />
           </Box>
 
-          <Typography variant="caption" color="text.secondary">
-            No activity for {staleDeals.thresholdDays}+ days
+          {/* Display No activity only when daysSinceActivity exceeds thresholdDays */}
+          <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.5 }}>
+            {staleCount > 0 ? 
+              `No activity for ${staleDeals.items.thresholdDays}+ days` : 
+              "No stale deals 🎉"
+            }
           </Typography>
 
-          <List dense>
-            {staleItems.slice(0, 5).map((deal) => (
-              <ListItem key={deal.deal_id} disableGutters>
-                <ListItemText
-                  primary={deal.accountName}
-                  secondary={`${deal.dealName ?? "Deal"} • ${
-                    deal.daysSinceActivity
-                  } days • ${formatCurrency(deal.amount)}`}
-                />
-              </ListItem>
-            ))}
-
-            {staleDeals.count === 0 && (
-              <Typography variant="body2" color="text.secondary">
+          <List dense sx={{ p: 0, m: 0 }}>
+            {staleCount > 0 ? (
+              staleItems.slice(0, 1).map((deal) => (
+                <ListItem key={deal.deal_id} disableGutters sx={{ px: 0 }}>
+                  <ListItemText
+                    primary={deal.accountName}
+                    secondary={`${deal.dealName ?? "Deal"} • ${deal.daysSinceActivity} days • ${formatCurrency(deal.amount)}`}
+                    sx={{ margin: 0 }}
+                  />
+                </ListItem>
+              ))
+            ) : (
+              <Typography variant="body2" color="text.secondary" sx={{ fontSize: "0.75rem" }}>
                 No stale deals 🎉
               </Typography>
             )}
           </List>
         </Box>
 
-        <Divider />
+        <Divider sx={{ my: 0.5 }} />
 
         {/* ================= UNDERPERFORMING REPS ================= */}
-        <Box my={3}>
+        <Box mb={0.5}>
           <Box display="flex" justifyContent="space-between">
-            <Typography variant="subtitle1">Underperforming Reps</Typography>
+            <Typography variant="subtitle1" sx={{ mb: 0 }}>
+              Underperforming Reps
+            </Typography>
             <Chip
-              label={underperformingReps.count}
-              color={underperformingReps.count > 0 ? "warning" : "success"}
+              label={repCount}
+              color={repCount > 0 ? "warning" : "success"}
               size="small"
+              sx={{ marginLeft: 0 }}
             />
           </Box>
 
-          <List dense>
-            {repItems.slice(0, 5).map((rep) => (
-              <ListItem key={rep.rep_id} disableGutters>
-                <ListItemText
-                  primary={rep.repName}
-                  secondary={`${rep.percentOfTarget}% of target • ${formatCurrency(
-                    rep.revenue
-                  )} / ${formatCurrency(rep.target)}`}
-                />
-              </ListItem>
-            ))}
-
-            {underperformingReps.count === 0 && (
-              <Typography variant="body2" color="text.secondary">
+          <List dense sx={{ p: 0, m: 0 }}>
+            {repCount > 0 ? (
+              repItems.slice(0, 1).map((rep) => (
+                <ListItem key={rep.rep_id} disableGutters sx={{ px: 0 }}>
+                  <ListItemText
+                    primary={rep.repName}
+                    secondary={`${rep.percentOfTarget}% of target • ${formatCurrency(rep.revenue)} / ${formatCurrency(rep.target)}`}
+                    sx={{ margin: 0 }}
+                  />
+                </ListItem>
+              ))
+            ) : (
+              <Typography variant="body2" color="text.secondary" sx={{ fontSize: "0.75rem" }}>
                 All reps on track 💪
               </Typography>
             )}
           </List>
         </Box>
 
-        <Divider />
+        <Divider sx={{ my: 0.5 }} />
 
         {/* ================= LOW ACTIVITY ACCOUNTS ================= */}
-        <Box mt={3}>
+        <Box mb={0.5}>
           <Box display="flex" justifyContent="space-between">
-            <Typography variant="subtitle1">Low Activity Accounts</Typography>
+            <Typography variant="subtitle1" sx={{ mb: 0 }}>
+              Low Activity Accounts
+            </Typography>
             <Chip
-              label={lowActivityAccounts.count}
-              color={lowActivityAccounts.count > 0 ? "warning" : "success"}
+              label={accountCount}
+              color={accountCount > 0 ? "warning" : "success"}
               size="small"
+              sx={{ marginLeft: 0 }}
             />
           </Box>
 
-          <Typography variant="caption" color="text.secondary">
-            Minimal engagement in last {lowActivityAccounts.thresholdDays} days
+          <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.5 }}>
+            {accountCount > 0 ? `Minimal engagement in last ${lowActivityAccounts.items.thresholdDays} days` : "Engagement healthy 👍"}
           </Typography>
 
-          <List dense>
-            {accountItems.slice(0, 5).map((acc) => (
-              <ListItem key={acc.account_id} disableGutters>
-                <ListItemText
-                  primary={acc.accountName}
-                  secondary={`Activities: ${acc.activityCount}${
-                    acc.daysSinceLastActivity
-                      ? ` • Last active ${acc.daysSinceLastActivity} days ago`
-                      : ""
-                  }`}
-                />
-              </ListItem>
-            ))}
-
-            {lowActivityAccounts.count === 0 && (
-              <Typography variant="body2" color="text.secondary">
+          <List dense sx={{ p: 0, m: 0 }}>
+            {accountCount > 0 ? (
+              accountItems.slice(0, 1).map((acc) => (
+                <ListItem key={acc.account_id} disableGutters sx={{ px: 0 }}>
+                  <ListItemText
+                    primary={acc.accountName}
+                    secondary={`Activities: ${acc.activityCount} • Last active ${acc.daysSinceLastActivity ? `${acc.daysSinceLastActivity} days ago` : "No recent activity"}`}
+                    sx={{ margin: 0 }}
+                  />
+                </ListItem>
+              ))
+            ) : (
+              <Typography variant="body2" color="text.secondary" sx={{ fontSize: "0.75rem" }}>
                 Engagement healthy 👍
               </Typography>
             )}

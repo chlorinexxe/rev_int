@@ -84,9 +84,7 @@ export async function getSummary() {
     `,
     [currentQuarter.start, currentQuarter.end]
   );
-  console.log("Current Quarter:", currentQuarter );
-  console.log("Revenue Row:", revenueRow);
-  console.log("prevQuarter:", prevQuarter);
+
 
   const revenue = revenueRow?.revenue ?? 0;
 
@@ -108,10 +106,6 @@ export async function getSummary() {
     `,
     quarterMonths
   );
-  console.log("Target Row:", targetRow);
-  console.log("quarterMonths:", quarterMonths);
-  console.log("Quarter Months Placeholders:",quarterMonths);
-
 
   const target = targetRow?.target ?? 0;
 

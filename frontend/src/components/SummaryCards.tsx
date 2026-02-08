@@ -1,5 +1,5 @@
 // frontend/src/components/SummaryCards.tsx
-import React, { useEffect } from "react";
+import React from "react";
 import { Card, CardContent, Typography, Grid, Box } from "@mui/material";
 import TrendingUpIcon from "@mui/icons-material/TrendingUp";
 import TrendingDownIcon from "@mui/icons-material/TrendingDown";
@@ -19,16 +19,6 @@ const SummaryCards: React.FC<SummaryData> = ({
   gapPercent = 0,
   changeQoQ = 0,
 }) => {
-  useEffect(() => {
-    console.log("📊 SUMMARY NORMALIZED", {
-      quarter,
-      currentRevenue,
-      targetRevenue,
-      gapPercent,
-      changeQoQ,
-    });
-  }, []);
-
   const currency = (v: number) => `$${v.toLocaleString()}`;
   const percent = (v: number) => `${v.toFixed(1)}%`;
 
@@ -43,7 +33,6 @@ const SummaryCards: React.FC<SummaryData> = ({
     {
       label: "Target",
       value: currency(targetRevenue),
-      sub: `Gap ${percent(gapPercent)}`,
     },
     {
       label: "Gap",

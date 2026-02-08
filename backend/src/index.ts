@@ -9,8 +9,8 @@ const app = express();
 initDb();
 loadData();
 
-app.use(cors());
 app.use(express.json());
+app.use(cors());
 app.use('/api', summaryRouter);
 app.get("/", (_req, res) => {
   res.send("Revenue Intelligence Backend is running");

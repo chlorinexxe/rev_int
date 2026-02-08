@@ -32,4 +32,5 @@ export const api = {
   getDrivers: () => fetchJSON("/api/drivers"),
   getRiskFactors: () => fetchJSON("/api/risk-factors"),
   getRecommendations: () => fetchJSON("/api/recommendations"),
+  getRevenueTrend: () => fetchJSON("/api/revenue-trend"),
 };

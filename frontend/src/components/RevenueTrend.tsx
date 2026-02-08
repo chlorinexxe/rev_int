@@ -1,179 +1,169 @@
-import React, { useEffect, useRef } from "react";
-import { Card, CardContent, Typography } from "@mui/material";
+import React, { useRef, useEffect, useState } from "react";
 import * as d3 from "d3";
+import { Card, CardContent, Typography, Box } from "@mui/material";
 
-/* ================= TYPES ================= */
-
-interface MonthlyDriver {
-  month: string;              // YYYY-MM
-  pipelineValue: number;
-  winRate: number | null;     // 0–1 or null
+interface RevenueMonth {
+  month: string;
+  revenue: number;
+  target: number;
+  gap: number; // Added to match your backend response
 }
 
 interface RevenueTrendProps {
-  data: MonthlyDriver[];      // already sliced to last 6 months
+  data: RevenueMonth[];
+  title?: string;
 }
 
-/* ================= COMPONENT ================= */
-
-const RevenueTrend: React.FC<RevenueTrendProps> = ({ data }) => {
-  const svgRef = useRef<SVGSVGElement | null>(null);
+const RevenueTrend: React.FC<RevenueTrendProps> = ({ data, title }) => {
+  const ref = useRef<SVGSVGElement>(null);
+  const [tooltip, setTooltip] = useState<{ x: number; y: number; content: string } | null>(null);
 
   useEffect(() => {
-    if (!data || data.length === 0) return;
+    if (!ref.current || data.length === 0) return;
 
-    /* ---------- SETUP ---------- */
+    // 1. Setup Canvas
+    const svg = d3.select(ref.current);
+    svg.selectAll("*").remove();
 
-    const margin = { top: 20, right: 30, bottom: 40, left: 70 };
-    const width = 820 - margin.left - margin.right;
-    const height = 300 - margin.top - margin.bottom;
+    const containerWidth = ref.current.parentElement!.getBoundingClientRect().width;
+    const height = 300;
+    const margin = { top: 40, right: 40, bottom: 40, left: 60 };
+    const width = containerWidth;
 
-    d3.select(svgRef.current).selectAll("*").remove();
+    // 2. Scales
+    const x = d3
+      .scaleBand()
+      .domain(data.map((d) => d.month))
+      .range([margin.left, width - margin.right])
+      .padding(0.4);
 
-    const svg = d3
-      .select(svgRef.current)
-      .attr("viewBox", `0 0 820 300`)
-      .append("g")
-      .attr("transform", `translate(${margin.left},${margin.top})`);
-
-    /* ---------- TRANSFORM DATA ---------- */
-
-    const parseMonth = d3.timeParse("%Y-%m");
-
-    const chartData = data.map((d) => ({
-      month: parseMonth(d.month)!,
-      label: d.month,
-      pipeline: d.pipelineValue,
-      weightedRevenue: Math.round(
-        d.pipelineValue * (d.winRate ?? 0)
-      ),
-    }));
-
-    /* ---------- SCALES ---------- */
-
-    const xScale = d3
-      .scaleBand<Date>()
-      .domain(chartData.map((d) => d.month))
-      .range([0, width])
-      .padding(0.3);
-
-    const yMax = d3.max(chartData, (d) =>
-      Math.max(d.pipeline, d.weightedRevenue)
-    ) as number;
-
-    const yScale = d3
+    // Find the highest value between revenue and target to set the Y-axis limit
+    const yMax = d3.max(data, (d) => Math.max(d.revenue, d.target)) ?? 0;
+    const y = d3
       .scaleLinear()
-      .domain([0, yMax * 1.15])
-      .range([height, 0]);
+      .domain([0, yMax * 1.1]) // Add 10% padding at the top
+      .range([height - margin.bottom, margin.top]);
 
-    /* ---------- AXES ---------- */
+    // 3. Axes
+    svg
+      .append("g")
+      .attr("transform", `translate(0,${height - margin.bottom})`)
+      .call(d3.axisBottom(x))
+      .attr("color", "#666");
 
     svg
       .append("g")
-      .attr("transform", `translate(0,${height})`)
-      .call(
-        d3.axisBottom(xScale).tickFormat((d) =>
-          d instanceof Date ? d3.timeFormat("%b")(d) : ""
-        )
-      );
+      .attr("transform", `translate(${margin.left},0)`)
+      .call(d3.axisLeft(y).ticks(6).tickFormat(d => `$${(Number(d) / 1000)}k`))
+      .attr("color", "#666");
 
-    svg.append("g").call(
-      d3
-        .axisLeft(yScale)
-        .ticks(5)
-        .tickFormat((d) => `₹${d3.format(",")(d as number)}`)
-    );
-
-    /* ---------- PIPELINE BARS ---------- */
-
+    // 4. Draw Bars (Revenue)
     svg
       .selectAll(".bar")
-      .data(chartData)
-      .enter()
-      .append("rect")
-      .attr("x", (d) => xScale(d.month)!)
-      .attr("y", (d) => yScale(d.pipeline))
-      .attr("width", xScale.bandwidth())
-      .attr("height", (d) => height - yScale(d.pipeline))
-      .attr("fill", "#6fb7ff")
-      .attr("rx", 4);
+      .data(data)
+      .join("rect")
+      .attr("class", "bar")
+      .attr("x", (d) => x(d.month)!)
+      .attr("y", (d) => y(d.revenue))
+      .attr("width", x.bandwidth())
+      .attr("height", (d) => height - margin.bottom - y(d.revenue))
+      .attr("fill", "#1976d2") // Professional Blue
+      .attr("rx", 4)
+      .on("mousemove", (event, d) => {
+        const [mx, my] = d3.pointer(event);
+        setTooltip({ 
+          x: mx, 
+          y: my, 
+          content: `Revenue: $${d.revenue.toLocaleString()}\nGap: $${d.gap.toLocaleString()}` 
+        });
+      })
+      .on("mouseleave", () => setTooltip(null));
 
-    /* ---------- WEIGHTED REVENUE LINE ---------- */
-
-    const line = d3
-      .line<typeof chartData[0]>()
-      .x((d) => xScale(d.month)! + xScale.bandwidth() / 2)
-      .y((d) => yScale(d.weightedRevenue));
+    // 5. Draw Line (Target)
+    const lineGenerator = d3
+      .line<RevenueMonth>()
+      .x((d) => x(d.month)! + x.bandwidth() / 2)
+      .y((d) => y(d.target))
+      .curve(d3.curveMonotoneX);
 
     svg
       .append("path")
-      .datum(chartData)
+      .datum(data)
       .attr("fill", "none")
-      .attr("stroke", "#f5a623")
-      .attr("stroke-width", 2)
-      .attr("d", line);
+      .attr("stroke", "#ff9800") // Orange Target Line
+      .attr("stroke-width", 3)
+      .attr("d", lineGenerator);
 
-    /* ---------- LINE DOTS ---------- */
-
+    // 6. Draw Dots (Target Points)
     svg
       .selectAll(".dot")
-      .data(chartData)
-      .enter()
-      .append("circle")
-      .attr(
-        "cx",
-        (d) => xScale(d.month)! + xScale.bandwidth() / 2
-      )
-      .attr("cy", (d) => yScale(d.weightedRevenue))
-      .attr("r", 4)
-      .attr("fill", "#f5a623");
-
-    /* ---------- TOOLTIP ---------- */
-
-    const tooltip = d3
-      .select("body")
-      .append("div")
-      .style("position", "absolute")
-      .style("background", "#fff")
-      .style("border", "1px solid #ccc")
-      .style("padding", "6px 8px")
-      .style("border-radius", "4px")
-      .style("font-size", "12px")
-      .style("pointer-events", "none")
-      .style("opacity", 0);
-
-    svg
-      .selectAll("rect")
-      .on("mouseover", function (event, d) {
-        const datum = d as typeof chartData[0];
-        tooltip
-          .style("opacity", 1)
-          .html(
-            `<strong>${datum.label}</strong><br/>
-             Pipeline: ₹${d3.format(",")(datum.pipeline)}<br/>
-             Weighted: ₹${d3.format(",")(datum.weightedRevenue)}`
-          )
-          .style("left", event.pageX + 10 + "px")
-          .style("top", event.pageY - 28 + "px");
+      .data(data)
+      .join("circle")
+      .attr("class", "dot")
+      .attr("cx", (d) => x(d.month)! + x.bandwidth() / 2)
+      .attr("cy", (d) => y(d.target))
+      .attr("r", 5)
+      .attr("fill", "#fff")
+      .attr("stroke", "#ff9800")
+      .attr("stroke-width", 2)
+      .on("mousemove", (event, d) => {
+        const [mx, my] = d3.pointer(event);
+        setTooltip({ 
+          x: mx, 
+          y: my, 
+          content: `Target: $${d.target.toLocaleString()}` 
+        });
       })
-      .on("mouseout", function () {
-        tooltip.style("opacity", 0);
-      });
+      .on("mouseleave", () => setTooltip(null));
 
   }, [data]);
 
-  /* ================= RENDER ================= */
-
   return (
-    <Card elevation={3}>
+    <Card elevation={3} sx={{ borderRadius: 2 }}>
       <CardContent>
-        <Typography variant="h6" gutterBottom>
-          Revenue Trend (Last 6 Months)
+        <Typography variant="h6" fontWeight="bold" color="textSecondary">
+          {title ?? "Revenue vs Target Trend"}
         </Typography>
-        <svg ref={svgRef} width="100%" height={300} />
+        
+        {/* Simple Legend */}
+        <Box sx={{ display: 'flex', gap: 2, mb: 2, mt: 1 }}>
+          <LegendItem color="#1976d2" label="Revenue (Bar)" />
+          <LegendItem color="#ff9800" label="Target (Line)" />
+        </Box>
+
+        <div style={{ position: "relative" }}>
+          <svg ref={ref} width="100%" height={300}></svg>
+          {tooltip && (
+            <div
+              style={{
+                position: "absolute",
+                top: tooltip.y - 60,
+                left: tooltip.x + 10,
+                backgroundColor: "rgba(0, 0, 0, 0.8)",
+                color: "#fff",
+                padding: "8px",
+                borderRadius: "4px",
+                pointerEvents: "none",
+                fontSize: "12px",
+                whiteSpace: "pre-line",
+                zIndex: 10,
+              }}
+            >
+              {tooltip.content}
+            </div>
+          )}
+        </div>
       </CardContent>
     </Card>
   );
 };
+
+// Small helper for the legend
+const LegendItem = ({ color, label }: { color: string; label: string }) => (
+  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+    <Box sx={{ width: 12, height: 12, bgcolor: color, borderRadius: '2px' }} />
+    <Typography variant="caption">{label}</Typography>
+  </Box>
+);
 
 export default RevenueTrend;

@@ -2,12 +2,10 @@ import sqlite3 from "sqlite3";
 import path from "path";
 
 const DB_PATH = path.join(__dirname, "..", "data.db");
-console.log("📂 SQLite DB Path:", DB_PATH);
 export const db = new sqlite3.Database(DB_PATH, (err) => {
   if (err) {
     console.error("❌ Failed to connect to SQLite", err);
   } else {
-    console.log("✅ Connected to SQLite");
   }
 });
 
@@ -57,6 +55,5 @@ export function initDb() {
       )
     `);
 
-    console.log("✅ Tables created / verified");
   });
 }

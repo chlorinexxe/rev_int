@@ -28,7 +28,6 @@ export function loadData() {
       );
     });
     accountStmt.finalize();
-    console.log(`✅ Loaded ${accounts.length} accounts`);
 
     // ---- Reps ----
     const reps = loadJson("reps.json");
@@ -41,8 +40,6 @@ export function loadData() {
       repStmt.run(r.rep_id, r.name);
     });
     repStmt.finalize();
-    console.log(`✅ Loaded ${reps.length} reps`);
-
     // ---- Deals ----
     const deals = loadJson("deals.json");
     const dealStmt = db.prepare(`
@@ -63,8 +60,6 @@ export function loadData() {
       );
     });
     dealStmt.finalize();
-    console.log(`✅ Loaded ${deals.length} deals`);
-
     // ---- Activities ----
     const activities = loadJson("activities.json");
     const activityStmt = db.prepare(`
@@ -82,7 +77,6 @@ export function loadData() {
       );
     });
     activityStmt.finalize();
-    console.log(`✅ Loaded ${activities.length} activities`);
 
     // ---- Targets ----
     const targets = loadJson("targets.json");
@@ -95,6 +89,5 @@ export function loadData() {
       targetStmt.run(t.month, t.target);
     });
     targetStmt.finalize();
-    console.log(`✅ Loaded ${targets.length} targets`);
   });
 }
